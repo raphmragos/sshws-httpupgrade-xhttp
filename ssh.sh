@@ -1,0 +1,182 @@
+#!/bin/bash
+
+# 📌 Your Settings
+USERNAME="virgozki"
+PASSWORD="virgozki"
+REGION="us-central1"
+SERVICE_NAME="virgozki"
+WSPATH="/Virgozki-Ws"
+HTTPUPGRADE_PATH="/Virgozki-HttpUpgrade"
+XHTTP_PATH="/Virgozki-Xhttp"
+DOMAIN="www.google.com"
+BUG_HOST="www.google.com"
+
+# 📁 Create working folder
+mkdir -p ~/virgozki && cd ~/virgozki
+
+# ⚙️ Xray Config: SSH WS + SSH HTTPUpgrade + SSH XHTTP (TLS + Bug Host)
+cat <<EOF > config.json
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "port": 10000,
+      "listen": "127.0.0.1",
+      "protocol": "ssh",
+      "settings": {
+        "users": [
+          {
+            "username": "$USERNAME",
+            "password": "$PASSWORD"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "$BUG_HOST",
+          "alpn": ["h2", "http/1.1"],
+          "allowInsecure": false
+        },
+        "wsSettings": {
+          "path": "$WSPATH",
+          "host": "$BUG_HOST"
+        }
+      }
+    },
+    {
+      "port": 10001,
+      "listen": "127.0.0.1",
+      "protocol": "ssh",
+      "settings": {
+        "users": [
+          {
+            "username": "$USERNAME",
+            "password": "$PASSWORD"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "httpupgrade",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "$BUG_HOST",
+          "alpn": ["h2", "http/1.1"],
+          "allowInsecure": false
+        },
+        "httpupgradeSettings": {
+          "path": "$HTTPUPGRADE_PATH",
+          "host": "$BUG_HOST"
+        }
+      }
+    },
+    {
+      "port": 10002,
+      "listen": "127.0.0.1",
+      "protocol": "ssh",
+      "settings": {
+        "users": [
+          {
+            "username": "$USERNAME",
+            "password": "$PASSWORD"
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "$BUG_HOST",
+          "alpn": ["h2", "http/1.1"],
+          "allowInsecure": false
+        },
+        "xhttpSettings": {
+          "path": "$XHTTP_PATH",
+          "host": "$BUG_HOST",
+          "mode": "packet-up"
+        }
+      }
+    }
+  ],
+  "outbounds": [ { "protocol": "freedom", "tag": "direct" } ]
+}
+EOF
+
+# 🌐 Nginx Config: TLS + 443 compatible + Bug Host
+cat <<EOF > nginx.conf
+worker_processes 1;
+events { worker_connections 1024; }
+http {
+  server {
+    listen 8080;
+    server_name _;
+
+    # Fallback page
+    location / {
+      proxy_pass https://$DOMAIN;
+      proxy_set_header Host $DOMAIN;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # SSH WebSocket
+    location $WSPATH {
+      proxy_pass http://127.0.0.1:10000;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade \$http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Host $BUG_HOST;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # SSH HTTPUpgrade
+    location $HTTPUPGRADE_PATH {
+      proxy_pass http://127.0.0.1:10001;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade \$http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Host $BUG_HOST;
+      proxy_set_header X-Forwarded-Proto https;
+      proxy_cache_bypass \$http_upgrade;
+    }
+
+    # SSH XHTTP
+    location $XHTTP_PATH {
+      proxy_pass http://127.0.0.1:10002;
+      proxy_http_version 1.1;
+      proxy_set_header Host $BUG_HOST;
+      proxy_set_header X-Forwarded-Proto https;
+    }
+  }
+}
+EOF
+
+# 🐳 Dockerfile
+cat <<EOF > Dockerfile
+FROM teddysun/xray:latest AS xray-bin
+FROM openresty/openresty:alpine-fat
+
+COPY --from=xray-bin /usr/bin/xray /usr/local/bin/xray
+RUN xray version
+
+COPY config.json /etc/xray.json
+COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+
+EXPOSE 8080
+
+CMD ["/bin/sh", "-c", "/usr/local/openresty/bin/openresty -g 'daemon off;' & /usr/local/bin/xray run -c /etc/xray.json"]
+EOF
+
+# 🚀 Deploy to Google Cloud Run
+gcloud run deploy $SERVICE_NAME \
+  --source . \
+  --region $REGION \
+  --platform managed \
+  --allow-unauthenticated \
+  --memory 512Mi \
+  --cpu 1 \
+  --port 8080
+
