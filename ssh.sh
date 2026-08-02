@@ -85,76 +85,95 @@ cat <<EOF > config.json
 }
 EOF
 
-# 🌐 Nginx Config
+# 🌐 Nginx Config (Optimized for Cloud Run)
 cat <<EOF > nginx.conf
-worker_processes 1;
-events { worker_connections 1024; }
+worker_processes auto;
+worker_rlimit_nofile 65535;
+events {
+    worker_connections 65535;
+    multi_accept on;
+}
 http {
-  server {
-    listen 8080;
-    server_name _;
+    sendfile on;
+    keepalive_timeout 300;
+    keepalive_requests 1000;
 
-    # Fallback page
-    location / {
-      proxy_pass https://$DOMAIN;
-      proxy_set_header Host $DOMAIN;
-      proxy_set_header X-Real-IP \$remote_addr;
-      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto https;
-    }
+    server {
+        listen 8080;
+        server_name _;
 
-    # SSH WebSocket
-    location $WSPATH {
-      proxy_pass http://127.0.0.1:10000;
-      proxy_http_version 1.1;
-      proxy_set_header Upgrade \$http_upgrade;
-      proxy_set_header Connection "upgrade";
-      proxy_set_header Host $BUG_HOST;
-      proxy_set_header X-Real-IP \$remote_addr;
-      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto https;
-    }
+        # Fallback page
+        location / {
+            proxy_pass https://$DOMAIN;
+            proxy_set_header Host $DOMAIN;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_buffering off;
+        }
 
-    # SSH HTTPUpgrade
-    location $HTTPUPGRADE_PATH {
-      proxy_pass http://127.0.0.1:10001;
-      proxy_http_version 1.1;
-      proxy_set_header Upgrade \$http_upgrade;
-      proxy_set_header Connection "upgrade";
-      proxy_set_header Host $BUG_HOST;
-      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto https;
-      proxy_cache_bypass \$http_upgrade;
-    }
+        # SSH WebSocket
+        location $WSPATH {
+            proxy_pass http://127.0.0.1:10000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $BUG_HOST;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_buffering off;
+            proxy_read_timeout 86400;
+        }
 
-    # SSH XHTTP
-    location $XHTTP_PATH {
-      proxy_pass http://127.0.0.1:10002;
-      proxy_http_version 1.1;
-      proxy_set_header Host $BUG_HOST;
-      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        # SSH HTTPUpgrade
+        location $HTTPUPGRADE_PATH {
+            proxy_pass http://127.0.0.1:10001;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $BUG_HOST;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_cache_bypass \$http_upgrade;
+            proxy_buffering off;
+            proxy_read_timeout 86400;
+        }
+
+        # SSH XHTTP
+        location $XHTTP_PATH {
+            proxy_pass http://127.0.0.1:10002;
+            proxy_http_version 1.1;
+            proxy_set_header Host $BUG_HOST;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_buffering off;
+            proxy_read_timeout 86400;
+        }
     }
-  }
 }
 EOF
 
-# 🐳 Dockerfile
+# 🐳 Dockerfile (Fixed startup order)
 cat <<EOF > Dockerfile
 FROM teddysun/xray:latest AS xray-bin
 FROM openresty/openresty:alpine-fat
 
+# Copy Xray binary
 COPY --from=xray-bin /usr/bin/xray /usr/local/bin/xray
-RUN xray version
 
+# Copy config files
 COPY config.json /etc/xray.json
 COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
+# Expose port
 EXPOSE 8080
 
-CMD ["/bin/sh", "-c", "/usr/local/openresty/bin/openresty -g 'daemon off;' & /usr/local/bin/xray run -c /etc/xray.json"]
+# Start services properly
+CMD ["/bin/sh", "-c", "/usr/local/bin/xray run -c /etc/xray.json & /usr/local/openresty/bin/openresty -g 'daemon off;'"]
 EOF
 
-# 🚀 Deploy to Google Cloud Run
+# 🚀 Deploy to Google Cloud Run (Complete command)
 gcloud run deploy $SERVICE_NAME \
   --source . \
   --region $REGION \
@@ -162,5 +181,7 @@ gcloud run deploy $SERVICE_NAME \
   --allow-unauthenticated \
   --memory 512Mi \
   --cpu 1 \
-  --port 8080
+  --port 8080 \
+  --timeout=3600 \
+  --concurrency=80
 
