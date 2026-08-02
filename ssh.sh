@@ -14,7 +14,7 @@ BUG_HOST="www.google.com"
 # 📁 Create working folder
 mkdir -p ~/virgozki && cd ~/virgozki
 
-# ⚙️ Xray Config: SSH WS + SSH HTTPUpgrade + SSH XHTTP
+# ⚙️ Xray Config: Fixed Host settings
 cat <<EOF > config.json
 {
   "log": { "loglevel": "warning" },
@@ -35,7 +35,7 @@ cat <<EOF > config.json
         "network": "ws",
         "wsSettings": {
           "path": "$WSPATH",
-          "host": "$BUG_HOST"
+          "host": ""
         }
       }
     },
@@ -55,7 +55,7 @@ cat <<EOF > config.json
         "network": "httpupgrade",
         "httpupgradeSettings": {
           "path": "$HTTPUPGRADE_PATH",
-          "host": "$BUG_HOST"
+          "host": ""
         }
       }
     },
@@ -75,7 +75,7 @@ cat <<EOF > config.json
         "network": "xhttp",
         "xhttpSettings": {
           "path": "$XHTTP_PATH",
-          "host": "$BUG_HOST",
+          "host": "",
           "mode": "packet-up"
         }
       }
@@ -85,7 +85,7 @@ cat <<EOF > config.json
 }
 EOF
 
-# 🌐 Nginx Config (Optimized for Cloud Run)
+# 🌐 Nginx Config: Tamang Proxy Host para sa Bug Host
 cat <<EOF > nginx.conf
 worker_processes auto;
 worker_rlimit_nofile 65535;
@@ -154,26 +154,21 @@ http {
 }
 EOF
 
-# 🐳 Dockerfile (Fixed startup order)
+# 🐳 Dockerfile: Tamang Pagpapatakbo
 cat <<EOF > Dockerfile
 FROM teddysun/xray:latest AS xray-bin
 FROM openresty/openresty:alpine-fat
 
-# Copy Xray binary
 COPY --from=xray-bin /usr/bin/xray /usr/local/bin/xray
-
-# Copy config files
 COPY config.json /etc/xray.json
 COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 
-# Expose port
 EXPOSE 8080
 
-# Start services properly
 CMD ["/bin/sh", "-c", "/usr/local/bin/xray run -c /etc/xray.json & /usr/local/openresty/bin/openresty -g 'daemon off;'"]
 EOF
 
-# 🚀 Deploy to Google Cloud Run (Complete command)
+# 🚀 Deploy Command
 gcloud run deploy $SERVICE_NAME \
   --source . \
   --region $REGION \
@@ -184,4 +179,3 @@ gcloud run deploy $SERVICE_NAME \
   --port 8080 \
   --timeout=3600 \
   --concurrency=80
-
