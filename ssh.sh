@@ -14,7 +14,7 @@ BUG_HOST="www.google.com"
 # 📁 Create working folder
 mkdir -p ~/virgozki && cd ~/virgozki
 
-# ⚙️ Xray Config: SSH WS + SSH HTTPUpgrade + SSH XHTTP (TLS + Bug Host)
+# ⚙️ Xray Config: SSH WS + SSH HTTPUpgrade + SSH XHTTP
 cat <<EOF > config.json
 {
   "log": { "loglevel": "warning" },
@@ -33,12 +33,6 @@ cat <<EOF > config.json
       },
       "streamSettings": {
         "network": "ws",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "$BUG_HOST",
-          "alpn": ["h2", "http/1.1"],
-          "allowInsecure": false
-        },
         "wsSettings": {
           "path": "$WSPATH",
           "host": "$BUG_HOST"
@@ -59,12 +53,6 @@ cat <<EOF > config.json
       },
       "streamSettings": {
         "network": "httpupgrade",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "$BUG_HOST",
-          "alpn": ["h2", "http/1.1"],
-          "allowInsecure": false
-        },
         "httpupgradeSettings": {
           "path": "$HTTPUPGRADE_PATH",
           "host": "$BUG_HOST"
@@ -85,12 +73,6 @@ cat <<EOF > config.json
       },
       "streamSettings": {
         "network": "xhttp",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "$BUG_HOST",
-          "alpn": ["h2", "http/1.1"],
-          "allowInsecure": false
-        },
         "xhttpSettings": {
           "path": "$XHTTP_PATH",
           "host": "$BUG_HOST",
@@ -103,7 +85,7 @@ cat <<EOF > config.json
 }
 EOF
 
-# 🌐 Nginx Config: TLS + 443 compatible + Bug Host
+# 🌐 Nginx Config
 cat <<EOF > nginx.conf
 worker_processes 1;
 events { worker_connections 1024; }
@@ -129,6 +111,7 @@ http {
       proxy_set_header Connection "upgrade";
       proxy_set_header Host $BUG_HOST;
       proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto https;
     }
 
@@ -139,6 +122,7 @@ http {
       proxy_set_header Upgrade \$http_upgrade;
       proxy_set_header Connection "upgrade";
       proxy_set_header Host $BUG_HOST;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto https;
       proxy_cache_bypass \$http_upgrade;
     }
@@ -148,7 +132,7 @@ http {
       proxy_pass http://127.0.0.1:10002;
       proxy_http_version 1.1;
       proxy_set_header Host $BUG_HOST;
-      proxy_set_header X-Forwarded-Proto https;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
   }
 }
